@@ -61,9 +61,12 @@ for i=1:n
       res(i+1).x = vl_myrec(res(i).x, opts.epsilon) ; 
     case 'log'
       res(i+1).x = vl_mylog(res(i).x) ;
-    case 'softmaxloss'
-      res(i+1).x = vl_mysoftmaxloss(res(i).x, l.class) ; 
-
+    case 'mse'
+      res(i+1).x = vl_mseloss(res(i).x, l.class) ; 
+    case 'loge'
+      res(i+1).x = vl_logeloss(res(i).x, l.class) ; 
+    case 'frob'
+      res(i+1).x = vl_frobloss(res(i).x, l.class) ; 
     case 'custom'
       res(i+1) = l.forward(l, res(i), res(i+1)) ;
     otherwise
@@ -105,8 +108,15 @@ if doder
         res(i).dzdx = vl_myrec(res(i).x, opts.epsilon, res(i+1).dzdx) ;
       case 'log'
         res(i).dzdx = vl_mylog(res(i).x, res(i+1).dzdx) ;
-      case 'softmaxloss'
-        res(i).dzdx = vl_mysoftmaxloss(res(i).x, l.class, res(i+1).dzdx) ;
+      case 'mse'
+        res(i).dzdx = vl_mseloss(res(i).x, l.class, res(i+1).dzdx) ;
+
+      case 'loge'
+        res(i).dzdx = vl_logeloss(res(i).x, l.class, res(i+1).dzdx) ;
+
+      case 'frob'
+        res(i).dzdx = vl_frobloss(res(i).x, l.class, res(i+1).dzdx) ;
+
       case 'custom'
         res(i) = l.backward(l, res(i), res(i+1)) ;
     end

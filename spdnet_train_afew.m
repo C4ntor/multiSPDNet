@@ -1,8 +1,8 @@
-function [net, info] = spdnet_train_afew(net, spd_train, opts)
-
+function [net, info, train_predictions, val_predictions] = spdnet_train_afew(net, opts)
 opts.errorLabels = {'top1e'};
-opts.train = find(spd_train.spd.set==1) ;
-opts.val = find(spd_train.spd.set==2) ;
+train = opts.train;
+val = opts.test;
+
     
 for epoch=1:opts.numEpochs
     learningRate = opts.learningRate(epoch);
@@ -23,12 +23,9 @@ for epoch=1:opts.numEpochs
          end
      end
     
-    train = opts.train(randperm(length(opts.train))) ; % shuffle
-    val = opts.val;
 
-    [net,stats.train] = process_epoch(opts, epoch, spd_train, train, learningRate, net) ;
-    [net,stats.val] = process_epoch(opts, epoch, spd_train, val, 0, net) ;
-
+    [net,stats.train, train_predictions] = process_epoch(opts, epoch, train, learningRate, net) ;
+    [net,stats.val, val_predictions] = process_epoch(opts, epoch, val, 0, net) ;
    
     % save
     evaluateMode = 0;
@@ -71,12 +68,18 @@ for epoch=1:opts.numEpochs
         title('error') ;
     end
     drawnow ;
-    print(1, modelFigPath, '-dpdf') ;
+    %print(1, modelFigPath, '-dpdf') ;
+    disp('---')
+    fprintf('EPOCH: %d',epoch);
+    fprintf(' TRAIN-MSE: %.3f', stats.train(3)) ;
+    fprintf(' TRAIN-loss: %.3f', stats.train(2)) ;
+    fprintf(' TEST-MSE: %.3f', stats.val(3)) ;
+    fprintf(' TEST-loss: %.3f', stats.val(2)) ;
 end
     
     
     
-function [net,stats] = process_epoch(opts, epoch, spd_train, trainInd, learningRate, net)
+function [net,stats, array] = process_epoch(opts, epoch, dataset, learningRate, net)
 
 training = learningRate > 0 ;
 if training, mode = 'training' ; else mode = 'validation' ; end
@@ -92,31 +95,34 @@ end
 batchSize = opts.batchSize;
 errors = 0;
 numDone = 0 ;
-
-
-for ib = 1 : batchSize : length(trainInd)
-    fprintf('%s: epoch %02d: batch %3d/%3d:', mode, epoch, ib,length(trainInd)) ;
+array=cell(1,length(dataset));
+for ib = 1 : batchSize : length(dataset)
+    %fprintf('%s: epoch %02d: batch %3d/%3d:', mode, epoch, ib,length(dataset)) ;
     batchTime = tic ;
     res = [];
-    if (ib+batchSize> length(trainInd))
-        batchSize_r = length(trainInd)-ib+1;
+    if (ib+batchSize> length(dataset))
+        batchSize_r = length(dataset)-ib+1;
     else
         batchSize_r = batchSize;
     end
-    spd_data = cell(batchSize_r,1);    
-    spd_label = zeros(batchSize_r,1);
-    for ib_r = 1 : batchSize_r
-        spdPath = [spd_train.spdDir '\' spd_train.spd.name{trainInd(ib+ib_r-1)}];
-        load(spdPath); spd_data{ib_r} = Y1;
-        spd_label(ib_r) = spd_train.spd.label(trainInd(ib+ib_r-1));
 
+    batch_data = cell(batchSize_r,1);
+    batch_target = cell(batchSize_r,1);
+    batch_baseline = cell(batchSize_r,1);
+    
+    for j = 1 : batchSize_r
+        dataset_index = ib + j - 1; 
+        batch_data{j} = dataset(dataset_index).X;  
+        batch_target{j} = dataset(dataset_index).Y;  
+        batch_baseline{j} = dataset(dataset_index).B;
     end
-    net.layers{end}.class = spd_label ;
+    net.layers{end}.class = batch_target;
 
     %forward/backward spdnet
     if training, dzdy = one; else dzdy = [] ; end
-    res = vl_myforbackward(net, spd_data, dzdy, res) ;
-   
+    res = vl_myforbackward(net, batch_data, dzdy, res) ; 
+
+
     %accumulating graidents
     if numGpus <= 1
       [net,res] = accumulate_gradients(opts, learningRate, batchSize_r, net, res) ;
@@ -130,23 +136,31 @@ for ib = 1 : batchSize : length(trainInd)
     end
           
     % accumulate training errors
+    %
     predictions = gather(res(end-1).x) ;
-    [~,pre_label] = sort(predictions, 'descend') ;
-    error = sum(~bsxfun(@eq, pre_label(1,:)', spd_label)) ;
+    array{ib} = predictions{1};
+    error = 0;
+    for ixx=1 : length(predictions)
+        n=length(predictions{ixx});
+        diff = predictions{ixx}-batch_target{ixx};
+        error = error + sum(diff(:).^2)/ (n^2); 
+    end
 
     numDone = numDone + batchSize_r ;
-    errors = errors+error;
+    errors = error/length(predictions);
     batchTime = toc(batchTime) ;
     speed = batchSize/batchTime ;
     stats = stats+[batchTime ; res(end).x ; error]; % works even when stats=[]
     
-    fprintf(' %.2f s (%.1f data/s)', batchTime, speed) ;
+    %fprintf(' %.2f s (%.1f data/s)', batchTime, speed) ;
 
-    fprintf(' error: %.5f', stats(3)/numDone) ;
-    fprintf(' obj: %.5f', stats(2)/numDone) ;
+    %fprintf(' MSE: %.5f', stats(3)) ;
+    %fprintf(' loss: %.5f', stats(2)) ;
+    %fprintf(' [%d/%d]', numDone, batchSize_r);
+    %fprintf('\n') ;
 
-    fprintf(' [%d/%d]', numDone, batchSize_r);
-    fprintf('\n') ;
+    
+    
     
 end
 

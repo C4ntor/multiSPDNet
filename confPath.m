@@ -13,5 +13,9 @@ cd spdnet;
 addpath(genpath(pwd));
 cd ..;
 
+cd datagenerator;
+addpath(genpath(pwd));
+cd ..;
+
 
 
